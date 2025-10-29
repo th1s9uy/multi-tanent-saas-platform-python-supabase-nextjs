@@ -56,14 +56,20 @@ BASE_TEMPLATE = """
         }}
         .cta-button {{
             display: inline-block;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: #ffffff;
+            background: linear-gradient(135deg, #4c1d95 0%, #5b21b6 100%);
+            color: #ffffff !important;
             text-decoration: none;
             padding: 14px 32px;
             border-radius: 6px;
             font-weight: 600;
             margin: 20px 0;
             text-align: center;
+            -webkit-text-fill-color: #ffffff;
+            border: 2px solid #4c1d95;
+        }}
+        .cta-button:hover {{
+            background: linear-gradient(135deg, #3c1361 0%, #4c1d95 100%);
+            opacity: 1;
         }}
         .info-box {{
             background-color: #f8f9fa;
