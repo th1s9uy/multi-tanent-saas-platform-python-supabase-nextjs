@@ -19,6 +19,7 @@ export function DummyOrgNotification({ onDismiss }: DummyOrgNotificationProps) {
   const { currentOrganization, loading: orgLoading } = useOrganization();
   const [isVisible, setIsVisible] = useState(true);
   const [isDummyOrg, setIsDummyOrg] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
     if (!user || orgLoading) {
@@ -27,6 +28,10 @@ export function DummyOrgNotification({ onDismiss }: DummyOrgNotificationProps) {
 
     if (currentOrganization) {
       setIsDummyOrg(isDummyOrganization(currentOrganization));
+      // Check if user is a platform admin or organization admin
+      const isPlatformAdmin = user.hasRole('platform_admin');
+      const isOrgAdmin = user.hasRole('org_admin', currentOrganization.id);
+      setIsAdmin(isPlatformAdmin || isOrgAdmin);
     }
   }, [user, currentOrganization, orgLoading]);
 
@@ -37,7 +42,7 @@ export function DummyOrgNotification({ onDismiss }: DummyOrgNotificationProps) {
     }
   };
 
-  if (orgLoading || !isVisible || !isDummyOrg || !currentOrganization) {
+  if (orgLoading || !isVisible || !isDummyOrg || !currentOrganization || !isAdmin) {
     return null;
   }
 
