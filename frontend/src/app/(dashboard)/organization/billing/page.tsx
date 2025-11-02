@@ -20,7 +20,6 @@ import { useBillingSummary } from '@/hooks/use-billing-summary';
 import { PlanSelection } from '@/components/billing/plan-selection';
 import { CreditPurchase } from '@/components/billing/credit-purchase';
 import { SubscriptionManagement } from '@/components/billing/subscription-management';
-import { OrganizationSelector } from '@/components/organizations/organization-selector';
 import { toast } from 'sonner';
 import { useSearchParams } from 'next/navigation';
 import { useOrganizationById } from '@/hooks/use-organization-by-id';

@@ -17,7 +17,7 @@ import type { Organization } from '@/types/organization';
 
 export default function OrganizationsPage() {
   const { organizations, loading: orgLoading, error: orgError } = useOrganization();
-  const { isPlatformAdmin, canUpdateOrganization, canDeleteOrganization } = useUserPermissions();
+  const { isPlatformAdmin } = useUserPermissions();
 
   // Dialog states
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
@@ -42,16 +42,6 @@ export default function OrganizationsPage() {
     refreshOrganizations();
     setDeleteDialogOpen(false);
     setSelectedOrganization(null);
-  };
-
-  const openEditDialog = (org: Organization) => {
-    setSelectedOrganization(org);
-    setEditDialogOpen(true);
-  };
-
-  const openDeleteDialog = (org: Organization) => {
-    setSelectedOrganization(org);
-    setDeleteDialogOpen(true);
   };
 
   if (orgLoading) {
