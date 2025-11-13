@@ -4,12 +4,12 @@ import React, { useState } from 'react';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/contexts/auth-context';
 import { useOrganization } from '@/contexts/organization-context';
-import { 
-  LayoutDashboard, 
-  Building2, 
-  Users, 
-  CreditCard, 
-  Settings, 
+import {
+  LayoutDashboard,
+  Building2,
+  Users,
+  CreditCard,
+  Settings,
   ChevronLeft,
   ChevronRight,
   LogOut,
@@ -59,6 +59,17 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
     }
   };
 
+  // Check if user is a platform admin
+  const isPlatformAdmin = user?.hasRole('platform_admin');
+
+   // Filter navigation items based on user permissions
+ const filteredNavigationItems = navigationItems.filter(item => {
+    if (item.name === 'Users') {
+      return isPlatformAdmin; // Only show Users to platform admins
+    }
+    return true; // Show all other items
+  });
+
   const handleNavigation = (href: string) => {
     router.push(href);
   };
@@ -74,10 +85,10 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
 
   const getBreadcrumbs = () => {
     const breadcrumbs = [];
-    
+
     // Extract orgId from the search params
     const orgId = searchParams.get('org_id');
-    
+
     if (pathname === '/dashboard') {
       breadcrumbs.push({ name: 'Dashboard', href: null });
     } else if (pathname === '/organizations') {
@@ -93,7 +104,12 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
       breadcrumbs.push({ name: 'Organization', href: orgHref });
       breadcrumbs.push({ name: 'Settings', href: null });
     } else if (pathname === '/users') {
-      breadcrumbs.push({ name: 'Users', href: null });
+      // Only show users breadcrumb if user has permission
+      if (isPlatformAdmin) {
+        breadcrumbs.push({ name: 'Users', href: null });
+      } else {
+        breadcrumbs.push({ name: 'Dashboard', href: null });
+      }
     } else if (pathname === '/organization/billing') {
       const orgHref = orgId ? `/organization?org_id=${orgId}` : '/organization';
       breadcrumbs.push({ name: 'Organization', href: orgHref });
@@ -115,7 +131,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
     } else {
       breadcrumbs.push({ name: 'Dashboard', href: null });
     }
-    
+
     return breadcrumbs;
   };
 
@@ -140,9 +156,9 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
 
         {/* Navigation - Scrollable if needed */}
         <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
-          {navigationItems.map((item) => {
+          {filteredNavigationItems.map((item) => {
             const Icon = item.icon;
-            const isActive = pathname === item.href || 
+            const isActive = pathname === item.href ||
               (item.href === '/organizations' && pathname.startsWith('/organizations'));
 
             return (

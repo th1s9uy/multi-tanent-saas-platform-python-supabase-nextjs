@@ -4,8 +4,24 @@ import React from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Users, UserPlus, UserCheck, UserX } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { useAuth } from '@/contexts/auth-context';
+import { AccessDenied } from '@/components/ui/access-denied';
 
 export default function UsersPage() {
+  const { user } = useAuth();
+
+  // Check if user is a platform admin
+  const isPlatformAdmin = user?.hasRole('platform_admin');
+
+  // If user is not a platform admin, show access denied message
+  if (!isPlatformAdmin) {
+    return <AccessDenied
+      title="Access Denied"
+      description="You do not have permission to access this page. Only platform administrators can view this page."
+      redirectPath="/dashboard"
+    />;
+  }
+
   return (
     <div className="p-6">
       {/* Page Header */}
