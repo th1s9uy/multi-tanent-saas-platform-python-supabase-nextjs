@@ -1,19 +1,18 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
-import { useRouter, usePathname } from 'next/navigation';
+import React, { useState } from 'react';
+import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/contexts/auth-context';
-import { organizationService } from '@/services/organization-service';
-import { 
-  LayoutDashboard, 
-  Building2, 
-  Users, 
-  CreditCard, 
-  Settings, 
+import { useOrganization } from '@/contexts/organization-context';
+import {
+  LayoutDashboard,
+  Building2,
+  Users,
+  CreditCard,
+  Settings,
   ChevronLeft,
   ChevronRight,
   LogOut,
-  User
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -25,7 +24,6 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { ThemeToggle } from '@/components/ui/theme-toggle';
-import type { Organization } from '@/types/organization';
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
@@ -38,52 +36,19 @@ const navigationItems = [
     icon: LayoutDashboard,
   },
   {
-    name: 'Organization',
-    href: '/organization',
-    icon: Building2,
-  },
-  {
     name: 'Users',
     href: '/users',
     icon: Users,
-  },
-  {
-    name: 'Billing',
-    href: '/billing',
-    icon: CreditCard,
-  },
-  {
-    name: 'Settings',
-    href: '/settings',
-    icon: Settings,
-  },
+ },
 ];
 
 export function DashboardLayout({ children }: DashboardLayoutProps) {
   const { user, signOut } = useAuth();
+  const { organizations, currentOrganization } = useOrganization();
   const router = useRouter();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [organization, setOrganization] = useState<Organization | null>(null);
-  const [, setLoading] = useState(true);
-
-  const loadUserOrganization = useCallback(async () => {
-    if (!user) return;
-    try {
-      const organizations = await organizationService.getUserOrganizations();
-      if (organizations && organizations.length > 0) {
-        setOrganization(organizations[0]); // Get the user's primary organization
-      }
-    } catch (error) {
-      console.error('Error loading user organization:', error);
-    } finally {
-      setLoading(false);
-    }
-  }, [user]);
-
-  useEffect(() => { 
-    loadUserOrganization();
-  }, [loadUserOrganization]);
 
   const handleSignOut = async () => {
     const { error } = await signOut();
@@ -94,12 +59,19 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
     }
   };
 
-  const handleNavigation = (href: string) => {
-    if (href === '/organization' && organization) {
-      router.push('/organization');
-    } else {
-      router.push(href);
+  // Check if user is a platform admin
+  const isPlatformAdmin = user?.hasRole('platform_admin');
+
+   // Filter navigation items based on user permissions
+ const filteredNavigationItems = navigationItems.filter(item => {
+    if (item.name === 'Users') {
+      return isPlatformAdmin; // Only show Users to platform admins
     }
+    return true; // Show all other items
+  });
+
+  const handleNavigation = (href: string) => {
+    router.push(href);
   };
 
   const getInitials = (name: string) => {
@@ -111,25 +83,56 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
       .slice(0, 2);
   };
 
-  const getCurrentPageTitle = () => {
-    if (pathname === '/dashboard') return 'Dashboard';
-    if (pathname === '/organization') return 'Organization';
-    if (pathname === '/organization/members') return 'Organization › Members';
-    if (pathname === '/organization/settings') return 'Organization › Settings';
-    if (pathname === '/organizations') return 'Organizations';
-    if (pathname === '/users') return 'Users';
-    if (pathname === '/billing') return 'Billing';
-    if (pathname === '/settings') return 'Settings';
-    
-    // Handle dynamic routes
-    if (pathname.startsWith('/organization')) {
-      if (pathname.includes('/members')) return 'Organization › Members';
-      if (pathname.includes('/settings')) return 'Organization › Settings';
-      return 'Organization';
+  const getBreadcrumbs = () => {
+    const breadcrumbs = [];
+
+    // Extract orgId from the search params
+    const orgId = searchParams.get('org_id');
+
+    if (pathname === '/dashboard') {
+      breadcrumbs.push({ name: 'Dashboard', href: null });
+    } else if (pathname === '/organizations') {
+      breadcrumbs.push({ name: 'Organizations', href: null });
+    } else if (pathname === '/organization') {
+      breadcrumbs.push({ name: 'Organization', href: null });
+    } else if (pathname === '/organization/members') {
+      const orgHref = orgId ? `/organization?org_id=${orgId}` : '/organization';
+      breadcrumbs.push({ name: 'Organization', href: orgHref });
+      breadcrumbs.push({ name: 'Members', href: null });
+    } else if (pathname === '/organization/settings') {
+      const orgHref = orgId ? `/organization?org_id=${orgId}` : '/organization';
+      breadcrumbs.push({ name: 'Organization', href: orgHref });
+      breadcrumbs.push({ name: 'Settings', href: null });
+    } else if (pathname === '/users') {
+      // Only show users breadcrumb if user has permission
+      if (isPlatformAdmin) {
+        breadcrumbs.push({ name: 'Users', href: null });
+      } else {
+        breadcrumbs.push({ name: 'Dashboard', href: null });
+      }
+    } else if (pathname === '/organization/billing') {
+      const orgHref = orgId ? `/organization?org_id=${orgId}` : '/organization';
+      breadcrumbs.push({ name: 'Organization', href: orgHref });
+      breadcrumbs.push({ name: 'Billing', href: null });
+    } else if (pathname === '/settings') {
+      breadcrumbs.push({ name: 'Settings', href: null });
+    } else if (pathname.startsWith('/organization')) {
+      // Handle dynamic organization routes
+      const orgHref = orgId ? `/organization?org_id=${orgId}` : '/organization';
+      if (pathname.includes('/members')) {
+        breadcrumbs.push({ name: 'Organization', href: orgHref });
+        breadcrumbs.push({ name: 'Members', href: null });
+      } else if (pathname.includes('/settings')) {
+        breadcrumbs.push({ name: 'Organization', href: orgHref });
+        breadcrumbs.push({ name: 'Settings', href: null });
+      } else {
+        breadcrumbs.push({ name: 'Organization', href: null });
+      }
+    } else {
+      breadcrumbs.push({ name: 'Dashboard', href: null });
     }
-    if (pathname.startsWith('/organizations')) return 'Organizations';
-    
-    return 'Dashboard';
+
+    return breadcrumbs;
   };
 
   return (
@@ -153,16 +156,16 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
 
         {/* Navigation - Scrollable if needed */}
         <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
-          {navigationItems.map((item) => {
+          {filteredNavigationItems.map((item) => {
             const Icon = item.icon;
-            const isActive = pathname === item.href || 
-              (item.href === '/organization' && pathname.startsWith('/organizations'));
+            const isActive = pathname === item.href ||
+              (item.href === '/organizations' && pathname.startsWith('/organizations'));
 
             return (
               <button
                 key={item.name}
                 onClick={() => handleNavigation(item.href)}
-                className={`w-full flex items-center space-x-3 px-3 py-2 rounded-lg transition-colors ${
+                className={`w-full flex items-center space-x-3 px-3 py-2 rounded-lg transition-colors cursor-pointer ${
                   isActive
                     ? 'bg-primary text-primary-foreground'
                     : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
@@ -175,42 +178,6 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
             );
           })}
         </nav>
-
-        {/* User Menu - Fixed at bottom */}
-        <div className="p-4 border-t border-border flex-shrink-0">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" className={`w-full ${sidebarCollapsed ? 'px-2' : 'justify-start px-3'} h-auto py-2`}>
-                <div className="flex items-center space-x-3">
-                  <Avatar className="h-8 w-8">
-                    <AvatarFallback className="bg-blue-500 text-white">
-                      {user?.firstName ? getInitials(`${user.firstName} ${user.lastName || ''}`) : 'U'}
-                    </AvatarFallback>
-                  </Avatar>
-                  {!sidebarCollapsed && (
-                    <div className="text-left">
-                      <p className="text-sm font-medium text-foreground">
-                        {user?.firstName} {user?.lastName}
-                      </p>
-                      <p className="text-xs text-muted-foreground">{user?.email}</p>
-                    </div>
-                  )}
-                </div>
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56">
-              <DropdownMenuItem>
-                <User className="mr-2 h-4 w-4" />
-                <span>Profile</span>
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={handleSignOut} className="text-red-600">
-                <LogOut className="mr-2 h-4 w-4" />
-                <span>Sign out</span>
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
       </div>
 
       {/* Main Content Area - Fixed height */}
@@ -220,16 +187,96 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
           <div className="px-6 py-4 flex items-center justify-between">
             <div className="flex items-center space-x-4">
               <div>
-                <h1 className="text-xl font-semibold text-foreground">
-                  {getCurrentPageTitle()}
-                </h1>
+                <nav className="flex" aria-label="Breadcrumb">
+                  <ol className="inline-flex items-center space-x-1 md:space-x-2">
+                    {getBreadcrumbs().map((breadcrumb, index) => (
+                      <li key={index} className="inline-flex items-center">
+                        {index > 0 && (
+                          <svg className="w-3 h-3 text-muted-foreground mx-1" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 6 10">
+                            <path stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="m1 9 4-4-4-4"/>
+                          </svg>
+                        )}
+                        {breadcrumb.href ? (
+                          <button
+                            onClick={() => router.push(breadcrumb.href!)}
+                            className="text-xl font-semibold text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                          >
+                            {breadcrumb.name}
+                          </button>
+                        ) : (
+                          <span className="text-xl font-semibold text-foreground">
+                            {breadcrumb.name}
+                          </span>
+                        )}
+                      </li>
+                    ))}
+                  </ol>
+                </nav>
               </div>
             </div>
             <div className="flex items-center space-x-4">
-              <span className="text-sm text-muted-foreground">
-                Welcome, {user?.firstName}
-              </span>
+              <div className="text-right">
+                <p className="text-sm font-medium text-foreground">
+                  Welcome, {user?.firstName}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {user?.email}
+                </p>
+              </div>
               <ThemeToggle />
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" className="relative h-8 w-8 rounded-full p-0">
+                    <Avatar className="h-8 w-8">
+                      <AvatarFallback className="bg-blue-500 text-white">
+                        {user?.firstName ? getInitials(`${user.firstName} ${user.lastName || ''}`) : 'U'}
+                      </AvatarFallback>
+                    </Avatar>
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56">
+                  <DropdownMenuItem onClick={() => router.push('/settings')}>
+                    <Settings className="mr-2 h-4 w-4" />
+                    <span>Settings</span>
+                  </DropdownMenuItem>
+                  {currentOrganization && user && (user.hasRole('platform_admin') || user.hasRole('org_admin', currentOrganization.id)) && (
+                    <>
+                      <DropdownMenuSeparator />
+                      {organizations.length > 1 && (
+                        <DropdownMenuItem onClick={() => router.push('/organizations')}>
+                          <Building2 className="mr-2 h-4 w-4" />
+                          <span>Organizations</span>
+                        </DropdownMenuItem>
+                      )}
+                      {organizations.length === 1 && currentOrganization && (
+                        <>
+                          <DropdownMenuItem onClick={() => router.push(`/organization?org_id=${currentOrganization.id}`)}>
+                            <Building2 className="mr-2 h-4 w-4" />
+                            <span>Organization</span>
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => router.push(`/organization/settings?org_id=${currentOrganization.id}`)}>
+                          <Settings className="mr-2 h-4 w-4" />
+                          <span>Org Settings</span>
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => router.push(`/organization/members?org_id=${currentOrganization.id}`)}>
+                            <Users className="mr-2 h-4 w-4" />
+                            <span>Members</span>
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => router.push(`/organization/billing?org_id=${currentOrganization.id}`)}>
+                            <CreditCard className="mr-2 h-4 w-4" />
+                            <span>Billing & Subscriptions</span>
+                          </DropdownMenuItem>
+                        </>
+                      )}
+                      <DropdownMenuSeparator />
+                    </>
+                  )}
+                  <DropdownMenuItem onClick={handleSignOut} className="text-red-600">
+                    <LogOut className="mr-2 h-4 w-4" />
+                    <span>Sign out</span>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           </div>
         </header>

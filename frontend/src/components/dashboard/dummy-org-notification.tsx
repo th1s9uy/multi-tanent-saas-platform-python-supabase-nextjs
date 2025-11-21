@@ -6,7 +6,7 @@ import { AlertCircle, X, ExternalLink } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { useAuth } from '@/contexts/auth-context';
-import { organizationService } from '@/services/organization-service';
+import { useOrganization } from '@/contexts/organization-context';
 import { isDummyOrganization } from '@/lib/organization-utils';
 import Link from 'next/link';
 
@@ -16,38 +16,24 @@ interface DummyOrgNotificationProps {
 
 export function DummyOrgNotification({ onDismiss }: DummyOrgNotificationProps) {
   const { user } = useAuth();
+  const { currentOrganization, loading: orgLoading } = useOrganization();
   const [isVisible, setIsVisible] = useState(true);
   const [isDummyOrg, setIsDummyOrg] = useState(false);
-  const [orgName, setOrgName] = useState('');
-  const [loading, setLoading] = useState(true);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
-    const checkDummyOrganization = async () => {
-      if (!user) {
-        setLoading(false);
-        return;
-      }
-      
-      try {
-        // Get user's organizations
-        const organizations = await organizationService.getUserOrganizations();
-        
-        if (organizations.length > 0) {
-          const org = organizations[0];
-          setOrgName(org.name);
-          
-          // Check if this is a dummy organization using the utility function
-          setIsDummyOrg(isDummyOrganization(org));
-        }
-      } catch (error) {
-        console.error('Error checking organization status:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
+    if (!user || orgLoading) {
+      return;
+    }
 
-    checkDummyOrganization();
-  }, [user]);
+    if (currentOrganization) {
+      setIsDummyOrg(isDummyOrganization(currentOrganization));
+      // Check if user is a platform admin or organization admin
+      const isPlatformAdmin = user.hasRole('platform_admin');
+      const isOrgAdmin = user.hasRole('org_admin', currentOrganization.id);
+      setIsAdmin(isPlatformAdmin || isOrgAdmin);
+    }
+  }, [user, currentOrganization, orgLoading]);
 
   const handleDismiss = () => {
     setIsVisible(false);
@@ -56,7 +42,7 @@ export function DummyOrgNotification({ onDismiss }: DummyOrgNotificationProps) {
     }
   };
 
-  if (loading || !isVisible || !isDummyOrg) {
+  if (orgLoading || !isVisible || !isDummyOrg || !currentOrganization || !isAdmin) {
     return null;
   }
 
@@ -68,13 +54,13 @@ export function DummyOrgNotification({ onDismiss }: DummyOrgNotificationProps) {
           <div className="flex-1 min-w-0">
             <p className="font-medium text-base mb-1">Complete Your Organization Setup</p>
             <p className="text-sm text-yellow-700 leading-relaxed">
-              Your organization &quot;{orgName}&quot; is using default information. 
+              Your organization &quot;{currentOrganization.name}&quot; is using default information. 
               Update your organization details for a better experience.
             </p>
           </div>
           <div className="flex items-center lg:ml-4">
             <Link 
-              href="/organization" 
+              href={`/organization?org_id=${currentOrganization.id}`} 
               className="inline-flex items-center text-sm font-medium text-yellow-700 hover:text-yellow-900 bg-yellow-100 hover:bg-yellow-200 px-4 py-2 rounded-md transition-colors whitespace-nowrap"
             >
               Update Now

@@ -18,12 +18,33 @@ export const supabase = createClient(
   supabaseAnonKey || 'placeholder-key',
   {
     auth: {
-      autoRefreshToken: true,
-      persistSession: true,
-      detectSessionInUrl: true,
+      autoRefreshToken: true,    // Auto-refresh tokens before expiry (network call)
+      persistSession: true,      // Store session in localStorage for fast restoration
+      detectSessionInUrl: true,  // Handle OAuth redirect callbacks
+      // storageKey: 'supabase.auth.token', // Default localStorage key
+      // storage: window.localStorage,       // Default storage mechanism
     },
   }
 );
+
+/**
+ * Resend verification email for a user
+ * @param email The email address to send verification to
+ * @returns Promise with error if any
+ */
+export async function resendVerificationEmail(email: string) {
+  const { error } = await supabase.auth.resend({
+    type: 'signup',
+    email: email,
+  });
+  
+  if (error) {
+    console.error('Error resending verification email:', error);
+    throw error;
+  }
+  
+  return { error: null };
+}
 
 // Import auth types from centralized location
 import type { AuthUser, AuthSession, SignUpData, SignInData } from '@/types/auth';

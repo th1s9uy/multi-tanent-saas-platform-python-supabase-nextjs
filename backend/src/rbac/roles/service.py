@@ -3,11 +3,12 @@ Role service for managing roles in the RBAC system.
 """
 
 import logging
-from typing import List, Optional, Tuple
+from typing import Optional
 from uuid import UUID
 from opentelemetry import trace, metrics
 from config import supabase_config
-from src.rbac.roles.models import Role, RoleCreate, RoleUpdate
+from src.rbac.roles.models import Role, RoleCreate, RoleUpdate, RoleWithPermissions
+from src.rbac.permissions.service import permission_service
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +45,7 @@ class RoleService:
         return self.supabase_config.client
     
     @tracer.start_as_current_span("role.create_role")
-    async def create_role(self, role_data: RoleCreate) -> Tuple[Optional[Role], Optional[str]]:
+    async def create_role(self, role_data: RoleCreate) -> tuple[Optional[Role], Optional[str]]:
         """Create a new role."""
         role_operations_counter.add(1, {"operation": "create_role"})
         
@@ -84,7 +85,7 @@ class RoleService:
             return None, str(e)
     
     @tracer.start_as_current_span("role.get_role_by_id")
-    async def get_role_by_id(self, role_id: UUID) -> Tuple[Optional[Role], Optional[str]]:
+    async def get_role_by_id(self, role_id: UUID) -> tuple[Optional[Role], Optional[str]]:
         """Get a role by its ID."""
         role_operations_counter.add(1, {"operation": "get_role_by_id"})
         
@@ -119,7 +120,7 @@ class RoleService:
             return None, str(e)
     
     @tracer.start_as_current_span("role.get_role_by_name")
-    async def get_role_by_name(self, name: str) -> Tuple[Optional[Role], Optional[str]]:
+    async def get_role_by_name(self, name: str) -> tuple[Optional[Role], Optional[str]]:
         """Get a role by its name."""
         role_operations_counter.add(1, {"operation": "get_role_by_name"})
         
@@ -154,7 +155,7 @@ class RoleService:
             return None, str(e)
     
     @tracer.start_as_current_span("role.get_all_roles")
-    async def get_all_roles(self) -> Tuple[List[Role], Optional[str]]:
+    async def get_all_roles(self) -> tuple[list[Role], Optional[str]]:
         """Get all roles."""
         role_operations_counter.add(1, {"operation": "get_all_roles"})
         
@@ -180,7 +181,7 @@ class RoleService:
             return [], str(e)
     
     @tracer.start_as_current_span("role.update_role")
-    async def update_role(self, role_id: UUID, role_data: RoleUpdate) -> Tuple[Optional[Role], Optional[str]]:
+    async def update_role(self, role_id: UUID, role_data: RoleUpdate) -> tuple[Optional[Role], Optional[str]]:
         """Update a role."""
         role_operations_counter.add(1, {"operation": "update_role"})
         
@@ -225,7 +226,7 @@ class RoleService:
             return None, str(e)
     
     @tracer.start_as_current_span("role.delete_role")
-    async def delete_role(self, role_id: UUID) -> Tuple[bool, Optional[str]]:
+    async def delete_role(self, role_id: UUID) -> tuple[bool, Optional[str]]:
         """Delete a role."""
         role_operations_counter.add(1, {"operation": "delete_role"})
         
@@ -256,6 +257,49 @@ class RoleService:
             current_span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
             role_errors_counter.add(1, {"operation": "delete_role", "error": "exception"})
             return False, str(e)
+
+    @tracer.start_as_current_span("role.get_role_with_permissions")
+    async def get_role_with_permissions(self, role_id: UUID) -> tuple[Optional[RoleWithPermissions], Optional[str]]:
+        """Get a role with its associated permissions."""
+        role_operations_counter.add(1, {"operation": "get_role_with_permissions"})
+
+        # Set attribute on current span
+        current_span = trace.get_current_span()
+        current_span.set_attribute("role.id", str(role_id))
+        try:
+            # Get the role
+            role, error = await self.get_role_by_id(role_id)
+            if error or not role:
+                current_span.set_status(trace.Status(trace.StatusCode.ERROR, error or "Role not found"))
+                role_errors_counter.add(1, {"operation": "get_role_with_permissions", "error": "role_not_found"})
+                return None, error or "Role not found"
+
+            # Get permissions for the role
+            permissions, error = await permission_service.get_permissions_for_role(role_id)
+            if error:
+                logger.error(f"Error getting permissions for role {role_id}: {error}")
+                current_span.set_status(trace.Status(trace.StatusCode.ERROR, error))
+                role_errors_counter.add(1, {"operation": "get_role_with_permissions", "error": "get_permissions_failed"})
+                return None, error
+
+            role_with_permissions = RoleWithPermissions(
+                id=role.id,
+                name=role.name,
+                description=role.description,
+                is_system_role=role.is_system_role,
+                created_at=role.created_at,
+                updated_at=role.updated_at,
+                permissions=permissions
+            )
+
+            current_span.set_status(trace.Status(trace.StatusCode.OK))
+            return role_with_permissions, None
+
+        except Exception as e:
+            logger.error(f"Exception while getting role with permissions {role_id}: {e}", exc_info=True)
+            current_span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
+            role_errors_counter.add(1, {"operation": "get_role_with_permissions", "error": "exception"})
+            return None, str(e)
 
 
 # Global role service instance

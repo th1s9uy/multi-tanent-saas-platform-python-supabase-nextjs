@@ -2,8 +2,9 @@
 Authentication service for handling user registration, login, and session management.
 """
 
-from typing import Tuple, Optional
+from typing import Optional
 from fastapi import HTTPException, status
+from uuid import UUID
 import logging
 from opentelemetry import trace, metrics
 
@@ -11,6 +12,8 @@ from config import supabase_config
 from .models import SignUpRequest, SignInRequest, AuthResponse, UserProfile
 from src.rbac.roles.service import role_service
 from src.rbac.user_roles.service import user_role_service
+from src.shared.utils import extract_first_last_name
+from src.organization.models import OrganizationCreate
 
 # Get tracer for this module
 tracer = trace.get_tracer(__name__)
@@ -48,24 +51,26 @@ class AuthService:
         return self.supabase_config.client
     
     @tracer.start_as_current_span("auth.sign_up")
-    async def sign_up(self, request: SignUpRequest) -> Tuple[Optional[AuthResponse], Optional[HTTPException]]:
+    async def sign_up(self, request: SignUpRequest) -> tuple[Optional[AuthResponse], Optional[HTTPException]]:
         """
         Register a new user account.
-        
+
         Args:
             request: SignUpRequest with user registration details
-            
+
         Returns:
-            Tuple of (AuthResponse or None, HTTPException or None)
+            tuple of (AuthResponse or None, HTTPException or None)
         """
         # Record metrics
         auth_attempts_counter.add(1, {"operation": "signup", "source": "backend"})
-        
+
         # Set attribute on current span
         current_span = trace.get_current_span()
         current_span.set_attribute("user.email", request.email)
+        if request.invitation_token:
+            current_span.set_attribute("invitation.token", request.invitation_token[:8] + "...")
         logging.info(f"Attempting to sign up user: {request.email}")
-        
+
         try:
             # Sign up with Supabase Auth
             response = self.supabase.auth.sign_up({
@@ -78,7 +83,7 @@ class AuthService:
                     }
                 }
             })
-            
+
             if not response or not response.user:
                 current_span.set_status(trace.Status(trace.StatusCode.ERROR, "Sign up failed"))
                 logging.error("Sign up failed - no user returned from Supabase")
@@ -87,33 +92,37 @@ class AuthService:
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Failed to create user account"
                 )
-            
+
             user = response.user
             session = response.session
-            
+
             # Log the successful sign up
             logging.info(f"User signed up successfully: {user.id}")
             current_span.set_attribute("user.id", str(user.id))
             auth_success_counter.add(1, {"operation": "signup"})
-            
+
             # Get user profile from metadata
             user_metadata = user.user_metadata or {}
+
+            # Extract first_name and last_name using utility function
+            first_name, last_name = extract_first_last_name(user_metadata)
+
             profile = UserProfile(
                 id=user.id,
                 email=user.email,
-                first_name=user_metadata.get("first_name", ""),
-                last_name=user_metadata.get("last_name", ""),
+                first_name=first_name,
+                last_name=last_name,
                 is_verified=user.email_confirmed_at is not None,
                 created_at=user.created_at
             )
-            
+
             # Create auth response
             auth_response = AuthResponse(
                 user=profile,
                 access_token=session.access_token if session else None,
                 refresh_token=session.refresh_token if session else None
             )
-            
+
             # Assign default org_admin role to new user
             try:
                 # Get the org_admin role
@@ -122,14 +131,13 @@ class AuthService:
                     logging.warning(f"Could not find org_admin role: {role_error}")
                 else:
                     # Create a dummy organization for the user with recognizable pattern
-                    from src.organization.models import OrganizationCreate
                     org_data = OrganizationCreate(
                         name=f"{user.email}'s Organization",
                         description=f"Default organization for {user.email}. Please update with your organization details.",
                         slug=f"{user.id[:8]}-dummy-org",
                         is_active=True
                     )
-                    
+
                     from src.organization.service import organization_service
                     organization, org_error = await organization_service.create_organization(org_data)
                     if org_error or not organization:
@@ -142,7 +150,7 @@ class AuthService:
                             role_id=org_admin_role.id,
                             organization_id=organization.id
                         )
-                        
+
                         user_role, role_assign_error = await user_role_service.assign_role_to_user(user_role_data)
                         if role_assign_error or not user_role:
                             logging.warning(f"Could not assign org_admin role: {role_assign_error}")
@@ -151,11 +159,10 @@ class AuthService:
                             # Set attributes on current span
                             current_span.set_attribute("role.assigned", True)
                             current_span.set_attribute("organization.id", str(organization.id))
-            
             except Exception as e:
                 logging.error(f"Error assigning default role: {e}")
                 current_span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
-            
+
             current_span.set_status(trace.Status(trace.StatusCode.OK))
             return auth_response, None
             
@@ -177,7 +184,7 @@ class AuthService:
             )
     
     @tracer.start_as_current_span("auth.sign_in")
-    async def sign_in(self, request: SignInRequest) -> Tuple[Optional[AuthResponse], Optional[HTTPException]]:
+    async def sign_in(self, request: SignInRequest) -> tuple[Optional[AuthResponse], Optional[HTTPException]]:
         """
         Authenticate user with email and password.
         
@@ -185,7 +192,7 @@ class AuthService:
             request: SignInRequest with user credentials
             
         Returns:
-            Tuple of (AuthResponse or None, HTTPException or None)
+            tuple of (AuthResponse or None, HTTPException or None)
         """
         # Record metrics
         auth_attempts_counter.add(1, {"operation": "signin", "source": "backend"})
@@ -221,11 +228,15 @@ class AuthService:
             
             # Get user profile from metadata
             user_metadata = user.user_metadata or {}
+            
+            # Extract first_name and last_name using utility function
+            first_name, last_name = extract_first_last_name(user_metadata)
+            
             profile = UserProfile(
                 id=user.id,
                 email=user.email,
-                first_name=user_metadata.get("first_name", ""),
-                last_name=user_metadata.get("last_name", ""),
+                first_name=first_name,
+                last_name=last_name,
                 is_verified=user.email_confirmed_at is not None,
                 created_at=user.created_at
             )
@@ -250,7 +261,7 @@ class AuthService:
             )
     
     @tracer.start_as_current_span("auth.sign_out")
-    async def sign_out(self, access_token: str) -> Tuple[bool, Optional[HTTPException]]:
+    async def sign_out(self, access_token: str) -> tuple[bool, Optional[HTTPException]]:
         """
         Sign out user and invalidate session.
         
@@ -258,7 +269,7 @@ class AuthService:
             access_token: User's access token
             
         Returns:
-            Tuple of (success boolean, HTTPException or None)
+            tuple of (success boolean, HTTPException or None)
         """
         # Record metrics
         auth_attempts_counter.add(1, {"operation": "signout", "source": "backend"})
@@ -269,11 +280,10 @@ class AuthService:
         logging.info("Attempting to sign out user")
         
         try:
-            # Set auth session for Supabase client
-            self.supabase.auth.set_session(access_token, None)
-            
-            # Sign out with Supabase Auth
-            self.supabase.auth.sign_out()
+            # Sign out by invalidating the token
+            # Note: We're not using set_session to avoid refresh_token requirement
+            # Instead, we'll invalidate the token directly
+            self.supabase.auth.sign_out(access_token)
             
             logging.info("User signed out successfully")
             current_span.set_status(trace.Status(trace.StatusCode.OK))
@@ -290,7 +300,7 @@ class AuthService:
             )
     
     @tracer.start_as_current_span("auth.refresh_token")
-    async def refresh_token(self, refresh_token: str) -> Tuple[Optional[AuthResponse], Optional[HTTPException]]:
+    async def refresh_token(self, refresh_token: str) -> tuple[Optional[AuthResponse], Optional[HTTPException]]:
         """
         Refresh access token using refresh token.
         
@@ -298,7 +308,7 @@ class AuthService:
             refresh_token: Valid refresh token
             
         Returns:
-            Tuple of (AuthResponse or None, HTTPException or None)
+            tuple of (AuthResponse or None, HTTPException or None)
         """
         # Record metrics
         auth_attempts_counter.add(1, {"operation": "refresh_token", "source": "backend"})
@@ -331,11 +341,15 @@ class AuthService:
             
             # Get user profile from metadata
             user_metadata = user.user_metadata or {}
+            
+            # Extract first_name and last_name using utility function
+            first_name, last_name = extract_first_last_name(user_metadata)
+            
             profile = UserProfile(
                 id=user.id,
                 email=user.email,
-                first_name=user_metadata.get("first_name", ""),
-                last_name=user_metadata.get("last_name", ""),
+                first_name=first_name,
+                last_name=last_name,
                 is_verified=user.email_confirmed_at is not None,
                 created_at=user.created_at
             )
@@ -360,31 +374,40 @@ class AuthService:
             )
     
     @tracer.start_as_current_span("auth.get_user")
-    async def get_user(self, access_token: str) -> Tuple[Optional[UserProfile], Optional[HTTPException]]:
+    async def get_user(self, access_token: str) -> tuple[Optional[UserProfile], Optional[HTTPException]]:
         """
-        Get current user profile.
-        
+        Get current user profile with roles and permissions.
+
         Args:
             access_token: User's access token
-            
+
         Returns:
-            Tuple of (UserProfile or None, HTTPException or None)
+            tuple of (UserProfile or None, HTTPException or None)
         """
         # Record metrics
         auth_attempts_counter.add(1, {"operation": "get_user", "source": "backend"})
-        
+
         # Set attribute on current span
         current_span = trace.get_current_span()
         current_span.set_attribute("token.provided", bool(access_token))
         logging.info("Attempting to get user profile")
-        
+
         try:
-            # Set auth session for Supabase client
-            self.supabase.auth.set_session(access_token, None)
-            
-            # Get current user from Supabase Auth
-            user = self.supabase.auth.get_user().user
-            
+            # Validate token directly without setting session to avoid refresh_token requirement
+            # We'll decode the JWT and validate with Supabase API directly
+            user_response = self.supabase.auth.get_user(access_token)
+
+            if not user_response or not user_response.user:
+                current_span.set_status(trace.Status(trace.StatusCode.ERROR, "Invalid token"))
+                logging.warning("Failed to get user - invalid token or no user response")
+                auth_failure_counter.add(1, {"operation": "get_user", "error": "invalid_token"})
+                return None, HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Invalid or expired token"
+                )
+
+            user = user_response.user
+
             if not user:
                 current_span.set_status(trace.Status(trace.StatusCode.ERROR, "Invalid token"))
                 logging.warning("Failed to get user - invalid token")
@@ -393,26 +416,39 @@ class AuthService:
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     detail="Invalid or expired token"
                 )
-            
+
             # Log the successful user retrieval
             logging.info(f"Retrieved user profile: {user.id}")
             current_span.set_attribute("user.id", str(user.id))
             auth_success_counter.add(1, {"operation": "get_user"})
-            
+
+            # Get user roles with permissions and organization context
+            roles_with_permissions, roles_error = await user_role_service.get_all_user_roles_with_permissions(UUID(user.id))
+            if roles_error:
+                logging.warning(f"Failed to get roles for user {user.id}: {roles_error}")
+                # Continue without roles - don't fail the entire request
+                roles_with_permissions = []
+
             # Get user profile from metadata
             user_metadata = user.user_metadata or {}
+
+            # Extract first_name and last_name using utility function
+            first_name, last_name = extract_first_last_name(user_metadata)
+
             profile = UserProfile(
                 id=user.id,
                 email=user.email,
-                first_name=user_metadata.get("first_name", ""),
-                last_name=user_metadata.get("last_name", ""),
-                is_verified=user.email_confirmed_at is not None,
-                created_at=user.created_at
+                first_name=first_name,
+                last_name=last_name,
+                email_confirmed_at=user.email_confirmed_at.isoformat() if user.email_confirmed_at else None,
+                created_at=user.created_at.isoformat() if user.created_at else "",
+                updated_at=user.updated_at.isoformat() if user.updated_at else "",
+                roles=roles_with_permissions
             )
-            
+
             current_span.set_status(trace.Status(trace.StatusCode.OK))
             return profile, None
-            
+
         except Exception as e:
             current_span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
             logging.error(f"Get user error: {e}")
@@ -421,6 +457,92 @@ class AuthService:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Internal server error while fetching user profile"
             )
+
+    @tracer.start_as_current_span("auth.get_user_by_email")
+    async def get_user_by_email(self, email: str) -> tuple[Optional[UserProfile], Optional[str]]:
+        """
+        Get user by email address.
+
+        Args:
+            email: User's email address
+
+        Returns:
+            tuple of (UserProfile or None, error message or None)
+        """
+        # Record metrics
+        auth_attempts_counter.add(1, {"operation": "get_user_by_email", "source": "backend"})
+
+        # Set attribute on current span
+        current_span = trace.get_current_span()
+        current_span.set_attribute("user.email", email)
+        logging.info(f"Attempting to get user by email: {email}")
+
+        try:
+            # Use Supabase Admin API to list users and find by email
+            # Note: In production with high volume, you'd want to cache this or use a different approach
+            response = self.supabase.auth.admin.list_users()
+
+            # Handle different response formats
+            users_list = []
+            if hasattr(response, 'users'):
+                # Response has .users attribute
+                users_list = response.users
+            elif isinstance(response, list):
+                # Response is directly a list
+                users_list = response
+            else:
+                logging.warning(f"Unexpected response format from list_users: {type(response)}")
+                current_span.set_status(trace.Status(trace.StatusCode.OK))
+                return None, None
+
+            if not users_list:
+                logging.info(f"No users found in system")
+                current_span.set_status(trace.Status(trace.StatusCode.OK))
+                return None, None
+
+            # Find user by email
+            user = None
+            for u in users_list:
+                if u.email and u.email.lower() == email.lower():
+                    user = u
+                    break
+
+            if not user:
+                logging.info(f"No user found with email: {email}")
+                current_span.set_status(trace.Status(trace.StatusCode.OK))
+                return None, None  # User not found is not an error
+
+            # Get user roles with permissions and organization context
+            roles_with_permissions, roles_error = await user_role_service.get_all_user_roles_with_permissions(UUID(user.id))
+            if roles_error:
+                logging.warning(f"Failed to get roles for user {user.id}: {roles_error}")
+                # Continue without roles - don't fail the entire request
+                roles_with_permissions = []
+
+            # Extract first_name and last_name from metadata
+            user_metadata = user.user_metadata or {}
+            first_name, last_name = extract_first_last_name(user_metadata)
+
+            profile = UserProfile(
+                id=user.id,
+                email=user.email,
+                first_name=first_name,
+                last_name=last_name,
+                email_confirmed_at=user.email_confirmed_at.isoformat() if user.email_confirmed_at else None,
+                created_at=user.created_at.isoformat() if user.created_at else "",
+                updated_at=user.updated_at.isoformat() if user.updated_at else "",
+                roles=roles_with_permissions
+            )
+
+            logging.info(f"Found user by email: {email}")
+            current_span.set_attribute("user.id", str(user.id))
+            current_span.set_status(trace.Status(trace.StatusCode.OK))
+            return profile, None
+
+        except Exception as e:
+            current_span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
+            logging.error(f"Get user by email error: {e}")
+            return None, str(e)
 
 
 # Global auth service instance

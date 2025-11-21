@@ -3,6 +3,20 @@
  */
 
 import { Organization } from './organization';
+import { UserRoleAssignment } from './rbac';
+
+// User profile type for backend API responses
+export interface UserProfile {
+  id: string;
+  email: string;
+  first_name: string;
+  last_name: string;
+  email_confirmed_at: boolean;
+  created_at: string;
+  updated_at: string;
+  has_organizations?: boolean;
+  roles: UserRoleAssignment[];
+}
 
 // Supabase types (to avoid importing the entire library in types)
 export interface SupabaseProvider {
@@ -25,6 +39,9 @@ export interface AuthUser {
   emailConfirmedAt?: string;
   createdAt: string;
   updatedAt: string;
+  roles?: UserRoleAssignment[];
+  hasRole: (roleName: string, organizationId?: string) => boolean;
+  hasPermission: (permissionName: string, organizationId?: string) => boolean;
 }
 
 // Auth session
@@ -42,6 +59,7 @@ export interface SignUpData {
   passwordConfirm: string;
   firstName: string;
   lastName: string;
+  invitationToken?: string;
 }
 
 // Sign in form data
@@ -64,7 +82,7 @@ export interface AuthContextType {
   session: any;
   loading: boolean;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  signUp: (data: SignUpData) => Promise<{ error: any }>;
+  signUp: (data: SignUpData) => Promise<{ user?: AuthUser; error: any }>;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   signIn: (data: SignInData) => Promise<{ error: any }>;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -72,6 +90,7 @@ export interface AuthContextType {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   signOut: () => Promise<{ error: any }>;
   isAuthenticated: boolean;
+  refreshUserProfile: () => Promise<void>;
 }
 
 // Auth provider props

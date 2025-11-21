@@ -15,6 +15,19 @@ export interface Organization {
   updated_at: string;
 }
 
+// Invitation type for organization membership invitations
+export interface Invitation {
+  id: string;
+  email: string;
+  organization_id: string;
+  invited_by: string;
+  token: string;
+  status: 'pending' | 'accepted' | 'expired' | 'cancelled';
+  expires_at: string;
+  created_at: string;
+  accepted_at?: string;
+}
+
 // For organization creation (subset of Organization)
 export interface OrganizationCreate {
   name: string;
